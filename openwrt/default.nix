@@ -3,27 +3,28 @@
   lib,
   pkgs,
   ...
-}:
-
-let
+}: let
   devType = lib.types.submoduleWith {
     specialArgs.pkgs = pkgs;
     description = "OpenWrt configuration";
     modules = [
       (
-        { name, config, ... }:
         {
+          name,
+          config,
+          ...
+        }: {
           options = {
             warnings = lib.mkOption {
               internal = true;
-              default = [ ];
+              default = [];
               type = lib.types.listOf lib.types.str;
             };
 
             assertions = lib.mkOption {
               type = lib.types.listOf lib.types.unspecified;
               internal = true;
-              default = [ ];
+              default = [];
               example = [
                 {
                   assertion = false;
@@ -60,15 +61,14 @@ let
               };
 
               sshConfig = lib.mkOption {
-                type =
-                  with lib.types;
+                type = with lib.types;
                   attrsOf (oneOf [
                     str
                     int
                     bool
                     path
                   ]);
-                default = { };
+                default = {};
                 description = ''
                   SSH options to apply to connections, see {manpage}`ssh_config(5)`.
                   Notably these are *not* command-line arguments, although they *will*
@@ -114,6 +114,15 @@ let
                   introduces possible failure points.
                 '';
               };
+
+              packageManager = lib.mkOption {
+                type = lib.types.enum ["opkg" "apk"];
+                default = "opkg";
+                description = ''
+                  Which package manager to use to install/uninstall packages and dependencies.
+                  Alpine linux apk has been introduced in OpenWrt 25.12 to replace opkg.
+                '';
+              };
             };
 
             build = lib.mkOption {
@@ -124,8 +133,7 @@ let
             deploySteps = lib.mkOption {
               type = lib.types.attrsOf (
                 lib.types.submodule (
-                  { name, ... }:
-                  {
+                  {name, ...}: {
                     options = {
                       name = lib.mkOption {
                         type = lib.types.str;
@@ -156,7 +164,7 @@ let
                 )
               );
               internal = true;
-              default = { };
+              default = {};
             };
           };
 
@@ -171,58 +179,56 @@ let
           ];
 
           config = {
-            build.deploy =
-              let
-                steps = lib.sort (a: b: a.priority < b.priority) (lib.attrValues config.deploySteps);
-                prepare = lib.concatMapStringsSep "\n\n" (s: "# prepare ${s.name}\n${s.prepare}") steps;
-                copy = lib.concatMapStringsSep "\n\n" (s: "# copy ${s.name}\n${s.copy}") steps;
-                config_generation =
-                  pkgs.runCommand "config_generation.sh"
+            build.deploy = let
+              steps = lib.sort (a: b: a.priority < b.priority) (lib.attrValues config.deploySteps);
+              prepare = lib.concatMapStringsSep "\n\n" (s: "# prepare ${s.name}\n${s.prepare}") steps;
+              copy = lib.concatMapStringsSep "\n\n" (s: "# copy ${s.name}\n${s.copy}") steps;
+              config_generation =
+                pkgs.runCommand "config_generation.sh"
+                {
+                  src = ./config_generation.sh;
+                  deploy_steps = ''
+                    ${lib.concatMapStrings (s: ''
+                        # apply ${s.name}
+                        log "running ${s.name} ..."
+                        ${s.apply}
+                      '')
+                      steps}
+                  '';
+                  rollback_timeout = config.deploy.rollbackTimeout;
+                  reload_service_wait = config.deploy.reloadServiceWait;
+                }
+                ''
+                  substitute "$src" "$out" \
+                    --subst-var deploy_steps \
+                    --subst-var rollback_timeout \
+                    --subst-var reload_service_wait
+                  chmod +x "$out"
+                '';
+              rebootTimeout = config.deploy.rollbackTimeout + config.deploy.rebootAllowance;
+              reloadTimeout = config.deploy.rollbackTimeout + config.deploy.reloadServiceWait;
+              sshOpts =
+                ''-o ControlPath="$TMP/cm" ''
+                + lib.escapeShellArgs (
+                  lib.mapAttrsToList
+                  (
+                    arg: val: "-o${arg}=${
+                      if val == true
+                      then "yes"
+                      else if val == false
+                      then "no"
+                      else toString val
+                    }"
+                  )
+                  (
                     {
-                      src = ./config_generation.sh;
-                      deploy_steps = ''
-                        ${lib.concatMapStrings (s: ''
-                          # apply ${s.name}
-                          log "running ${s.name} ..."
-                          ${s.apply}
-                        '') steps}
-                      '';
-                      rollback_timeout = config.deploy.rollbackTimeout;
-                      reload_service_wait = config.deploy.reloadServiceWait;
+                      ControlMaster = "auto";
+                      User = config.deploy.user;
                     }
-                    ''
-                      substitute "$src" "$out" \
-                        --subst-var deploy_steps \
-                        --subst-var rollback_timeout \
-                        --subst-var reload_service_wait
-                      chmod +x "$out"
-                    '';
-                rebootTimeout = config.deploy.rollbackTimeout + config.deploy.rebootAllowance;
-                reloadTimeout = config.deploy.rollbackTimeout + config.deploy.reloadServiceWait;
-                sshOpts =
-                  ''-o ControlPath="$TMP/cm" ''
-                  + lib.escapeShellArgs (
-                    lib.mapAttrsToList
-                      (
-                        arg: val:
-                        "-o${arg}=${
-                          if val == true then
-                            "yes"
-                          else if val == false then
-                            "no"
-                          else
-                            toString val
-                        }"
-                      )
-                      (
-                        {
-                          ControlMaster = "auto";
-                          User = config.deploy.user;
-                        }
-                        // config.deploy.sshConfig
-                      )
-                  );
-              in
+                    // config.deploy.sshConfig
+                  )
+                );
+            in
               pkgs.writeShellApplication {
                 name = "deploy-${name}";
                 text = ''
@@ -372,21 +378,18 @@ let
       )
     ];
   };
-
-in
-
-{
+in {
   options = {
     warnings = lib.mkOption {
       internal = true;
-      default = [ ];
+      default = [];
       type = lib.types.listOf lib.types.str;
     };
 
     assertions = lib.mkOption {
       type = lib.types.listOf lib.types.unspecified;
       internal = true;
-      default = [ ];
+      default = [];
       example = [
         {
           assertion = false;
@@ -402,7 +405,7 @@ in
 
     openwrt = lib.mkOption {
       type = lib.types.attrsOf devType;
-      default = { };
+      default = {};
       description = ''
         OpenWrt device configurations. Each attribute will produce an independent deployment
         script that applies the corresponding configuration to the target device.
@@ -414,17 +417,20 @@ in
     warnings = lib.flatten (
       lib.mapAttrsToList (
         name: dev: lib.map (msg: "in configuration for device ${name}: " + msg) dev.warnings
-      ) config.openwrt
+      )
+      config.openwrt
     );
 
     assertions = lib.flatten (
       lib.mapAttrsToList (
         name: dev:
-        lib.map (assertion: {
-          inherit (assertion) assertion;
-          message = "in configuration for device ${name}: " + assertion.message;
-        }) dev.assertions
-      ) config.openwrt
+          lib.map (assertion: {
+            inherit (assertion) assertion;
+            message = "in configuration for device ${name}: " + assertion.message;
+          })
+          dev.assertions
+      )
+      config.openwrt
     );
   };
 }
