@@ -42,9 +42,9 @@ in {
 
         (lib.mkIf (config.deploy.packageManager == "apk")
           ''
-            if [ ${depsApk.version} != "$(apk info ${depsApk.package_name} | grep Version | cut -d' ' -f2)" ]; then
-              apk update
-              apk --update-cache  add --allow-untrusted /tmp/deps-${depsApk.version}.apk
+            if [ ${depsApk.version} != "$(apk query --no-cache ${depsApk.package_name} | grep Version | cut -d' ' -f2)" ]; then
+              apk update --no-cache
+              apk add --no-cache --allow-untrusted /tmp/deps-${depsApk.version}.apk
             fi
           '')
       ];
