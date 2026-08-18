@@ -28,7 +28,7 @@ in {
           '')
         (lib.mkIf (config.deploy.packageManager == "apk")
           ''
-            scp ${depsApk}/*.apk device:/tmp/deps-${depsApk.version}.apk
+            scp ${depsApk}/*.apk device:/tmp/deps-${depsApk.hash}.apk
           '')
       ];
       apply = lib.mkMerge [
@@ -42,9 +42,9 @@ in {
 
         (lib.mkIf (config.deploy.packageManager == "apk")
           ''
-            if [ ${depsApk.version} != "$(apk query --no-cache ${depsApk.package_name} | grep Version | cut -d' ' -f2)" ]; then
+            if [ ${depsApk.hash} != "$(apk query --no-cache ${depsApk.package_name} | grep Version | cut -d' ' -f2)" ]; then
               apk update --no-cache
-              apk add --no-cache --allow-untrusted /tmp/deps-${depsApk.version}.apk
+              apk add --no-cache --allow-untrusted /tmp/deps-${depsApk.hash}.apk
             fi
           '')
       ];
@@ -86,7 +86,7 @@ in {
 
     build.depsApkPackage = let
       # APKBUILD
-      version = builtins.hashString "sha256" (toString config.packages);
+      hash = builtins.hashString "sha256" (toString config.packages);
       package_name = "extra-system-deps";
       pkgname = package_name;
       pkgver = "1.0.0-r0";
@@ -103,7 +103,7 @@ in {
     in
       pkgs.runCommand "deps.apk"
       {
-        inherit version;
+        inherit hash;
         inherit package_name;
         name = "buildExtraDepsPkg";
         src = ./.;
@@ -116,18 +116,20 @@ in {
 
         mkdir ./deps
         mkdir $out
-        touch "$out/${version}-deps.apk"
+        touch "$out/${hash}-deps.apk"
 
         apk mkpkg \
           --info "name:${pkgname}" \
           --info "version:${pkgver}" \
+          --info "hashes:${hash}" \
           --info "description:${pkgdesc}" \
           --info "arch:${arch}" \
           --info "license:${license}" \
           --info "url:${url}" \
+          --info "replaces:${package_name}" \
           --info "depends:${depends}" \
           --files "./deps" \
-          --output "$out/${version}-deps.apk"
+          --output "$out/${hash}-deps.apk"
       '';
   };
 }
