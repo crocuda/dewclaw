@@ -3,122 +3,127 @@
   lib,
   config,
   ...
-}:
-
-let
+}: let
   cfg = config.uci;
 
-  formatConfig =
-    nix:
+  formatConfig = nix:
     lib.concatStringsSep "\n" (
       lib.flatten (
         lib.mapAttrsToList (config: sections: [
           "package ${config}"
           (lib.mapAttrsToList formatSections sections)
-        ]) nix
+        ])
+        nix
       )
     );
 
-  formatSections =
-    type: sections:
-    if lib.isAttrs sections then
+  formatSections = type: sections:
+    if lib.isAttrs sections
+    then
       lib.mapAttrsToList (name: vals: [
         "config ${type} ${formatScalar name}"
         (formatSection vals)
-      ]) sections
+      ])
+      sections
     else
       map (vals: [
         "config ${type}"
         (formatSection vals)
-      ]) sections;
+      ])
+      sections;
 
   formatSection = lib.mapAttrsToList (
     option: value:
-    if lib.isList value then
-      map (value: "  list ${option} ${formatScalar value}") value
-    else
-      "  option ${option} ${formatScalar value}"
+      if lib.isList value
+      then map (value: "  list ${option} ${formatScalar value}") value
+      else "  option ${option} ${formatScalar value}"
   );
 
-  formatScalar =
-    val:
-    if lib.isBool val then
-      (if val then "'1'" else "'0'")
-    else if lib.isInt val then
-      "'${toString val}'"
-    else if lib.isAttrs val then
-      "'${secretName val._secret}'"
-    else
-      "'${lib.replaceStrings [ "'" ] [ "'\\''" ] val}'";
+  formatScalar = val:
+    if lib.isBool val
+    then
+      (
+        if val
+        then "'1'"
+        else "'0'"
+      )
+    else if lib.isInt val
+    then "'${toString val}'"
+    else if lib.isAttrs val
+    then "'${secretName val._secret}'"
+    else "'${lib.replaceStrings ["'"] ["'\\''"] val}'";
 
   secretName = sec: "@secret_${sec}_${builtins.hashString "sha256" sec}@";
 
-  collectSecrets =
-    nix:
+  collectSecrets = nix:
     lib.pipe nix [
       lib.attrValues
       (lib.concatMap lib.attrValues)
-      (lib.concatMap (s: if lib.isAttrs s then lib.attrValues s else s))
+      (lib.concatMap (s:
+        if lib.isAttrs s
+        then lib.attrValues s
+        else s))
       (lib.concatMap lib.attrValues)
       (lib.concatMap lib.toList)
       (lib.concatMap (
         v:
-        if v ? _secret then
-          [
+          if v ? _secret
+          then [
             {
               name = v._secret;
-              value = { };
+              value = {};
             }
           ]
-        else
-          [ ]
+          else []
       ))
       lib.listToAttrs
       lib.attrNames
     ];
 
-  uciIdentifierCheck =
-    type: attrs:
-    let
-      invalid = lib.filter (
-        n: builtins.match (if type == "config" then "[a-zA-Z0-9_-]+" else "[a-zA-Z0-9_]+") n == null
-      ) (lib.attrNames attrs);
-    in
-    lib.warnIf (invalid != [ ]) ("Invalid UCI ${type} names found: ${toString invalid}") (
-      invalid == [ ]
+  uciIdentifierCheck = type: attrs: let
+    invalid = lib.filter (
+      n:
+        builtins.match (
+          if type == "config"
+          then "[a-zA-Z0-9_-]+"
+          else "[a-zA-Z0-9_]+"
+        )
+        n
+        == null
+    ) (lib.attrNames attrs);
+  in
+    lib.warnIf (invalid != []) "Invalid UCI ${type} names found: ${toString invalid}" (
+      invalid == []
     );
-in
-
-{
+in {
   imports = [
-    (lib.mkRenamedOptionModule [ "uci" "sopsSecrets" ] [ "sopsSecrets" ])
-    (lib.mkRenamedOptionModule [ "uci" "secretsCommand" ] [ "secretsCommand" ])
+    (lib.mkRenamedOptionModule ["uci" "sopsSecrets"] ["sopsSecrets"])
+    (lib.mkRenamedOptionModule ["uci" "secretsCommand"] ["secretsCommand"])
   ];
 
-  options.uci = {
+  options.uci = rec {
+    settingsEarly = settings;
     settings = lib.mkOption {
-      type =
-        with lib.types;
-        let
-          scalar = oneOf [
-            str
-            int
-            bool
-            (submodule {
-              options._secret = lib.mkOption {
-                type = str;
-                description = ''
-                  Name of the secret to insert into the config from data exported
-                  by {option}`secretsCommand`. Secrets are always interpolated as
-                  strings, which uci allows for scalars. Lists cannot currently
-                  be made entirely secret, only individual values of lists can.
-                '';
-              };
-            })
-          ];
-          uciAttrsOf = type: elem: addCheck (attrsOf elem) (uciIdentifierCheck type);
-          options = uciAttrsOf "option" (either scalar (listOf scalar));
-        in
+      type = with lib.types; let
+        scalar = oneOf [
+          str
+          int
+          bool
+          (submodule {
+            options._secret = lib.mkOption {
+              type = str;
+              description = ''
+                Name of the secret to insert into the config from data exported
+                by {option}`secretsCommand`. Secrets are always interpolated as
+                strings, which uci allows for scalars. Lists cannot currently
+                be made entirely secret, only individual values of lists can.
+              '';
+            };
+          })
+        ];
+        uciAttrsOf = type: elem: addCheck (attrsOf elem) (uciIdentifierCheck type);
+        options = uciAttrsOf "option" (either scalar (listOf scalar));
+      in
         submodule {
           freeformType =
             # <config>.<name>=type       -> config.type.name ...
@@ -128,14 +133,15 @@ in
               # type
               attrsOf (
                 either (uciAttrsOf "section" options) # name ...
-                  (listOf options) # [{ ... }]
+                
+                (listOf options) # [{ ... }]
               )
             )
             // {
               description = "UCI config";
             };
         };
-      default = { };
+      default = {};
       description = ''
         UCI settings in hierarchical representation. The toplevel key of this
         set denotes a UCI package, the second level the type of section, and the
@@ -154,15 +160,15 @@ in
             netmask = "255.0.0.0";
           };
 
-          globals = [ { ula_prefix = "fdb8:155d:7ef5::/48"; } ];
+          globals = [{ula_prefix = "fdb8:155d:7ef5::/48";}];
         };
       };
     };
 
     retain = lib.mkOption {
       type = lib.types.listOf lib.types.str;
-      default = [ ];
-      example = [ "ucitrack" ];
+      default = [];
+      example = ["ucitrack"];
       description = ''
         UCI package configuration to retain. Packages listed here will not have preexisting
         configuration deleted during deployment, even if no matching {option}`settings`
@@ -171,41 +177,36 @@ in
     };
   };
 
-  config = {
-    build.configFile = pkgs.writeText "config" (formatConfig cfg.settings);
-
-    deploySteps.uciConfig =
-      # correctness of config identifiers can't be checked on the type level
-      # because submodules are weird sometimes, so we have to do it here.
-      assert uciIdentifierCheck "config" cfg.settings;
-      let
+  config = let
+    ## Function that takes the set of config file to deploy and a priority.
+    mkDeployStep = configFile: priority:
+    # correctness of config identifiers can't be checked on the type level
+    # because submodules are weird sometimes, so we have to do it here.
+      assert uciIdentifierCheck "config" cfg.settings; let
         cfgName = baseNameOf config.build.configFile;
         jq = lib.getExe pkgs.jq;
         configured = lib.attrNames config.uci.settings ++ config.uci.retain;
-      in
-      {
-        priority = 90;
+      in {
+        inherit priority;
         prepare = ''
           cp --no-preserve=all ${config.build.configFile} "$TMP"
           (
             umask 0077
             ${lib.concatMapStrings (
-              secret:
-              let
-                arg = lib.escapeShellArg secret;
-              in
-              ''
-                has="$(${jq} -r --arg s ${arg} 'has($s)' <"$S")"
-                $has || {
-                  log_err secret ${arg} not defined
-                  exit 1
-                }
-                ${pkgs.replace-secret}/bin/replace-secret \
-                  ${lib.escapeShellArg (secretName secret)} \
-                  <(${jq} -r --arg s ${arg} '.[$s]'" | tostring | sub(\"'\"; \"'\\\\'''\")" <"$S") \
-                  "$TMP"/${cfgName}
-              ''
-            ) (collectSecrets cfg.settings)}
+            secret: let
+              arg = lib.escapeShellArg secret;
+            in ''
+              has="$(${jq} -r --arg s ${arg} 'has($s)' <"$S")"
+              $has || {
+                log_err secret ${arg} not defined
+                exit 1
+              }
+              ${pkgs.replace-secret}/bin/replace-secret \
+                ${lib.escapeShellArg (secretName secret)} \
+                <(${jq} -r --arg s ${arg} '.[$s]'" | tostring | sub(\"'\"; \"'\\\\'''\")" <"$S") \
+                "$TMP"/${cfgName}
+            ''
+          ) (collectSecrets cfg.settings)}
           )
         '';
         copy = ''
@@ -219,14 +220,30 @@ in
             cd /etc/config
             for cfg in *; do
               case "$cfg" in
-                ${lib.optionalString (configured != [ ]) ''
-                  ${lib.concatMapStringsSep "|" lib.escapeShellArg configured}) : ;;
-                ''}
+                ${lib.optionalString (configured != []) ''
+            ${lib.concatMapStringsSep "|" lib.escapeShellArg configured}) : ;;
+          ''}
                 *) rm "$cfg" ;;
               esac
             done
           )
         '';
       };
+  in {
+    build.configFileEarly = pkgs.writeText "config" (formatConfig cfg.settingsEarly);
+    deploySteps.uciConfigEarly =
+      {}
+      // mkDeployStep config.build.configFileEarly 50
+      // lib.mkIf (builtins.hasAttr "network" config.build.configFileEarly) {
+        # Dangerous! May cause unknown state and blind device.
+        apply = lib.mkAfter "service network restart";
+      }
+      // lib.mkIf (builtins.hasAttr "fstab" config.build.configFileEarly) {
+        # Dangerous! May cause unknown state and blind device.
+        apply = lib.mkAfter "service fstab restart";
+      };
+
+    build.configFile = pkgs.writeText "config" (formatConfig cfg.settings);
+    deploySteps.uciConfig = mkDeployStep config.build.configFile 90;
   };
 }
