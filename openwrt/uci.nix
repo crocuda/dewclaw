@@ -4,8 +4,6 @@
   config,
   ...
 }: let
-  cfg = config.uci;
-
   formatConfig = nix:
     lib.concatStringsSep "\n" (
       lib.flatten (
@@ -101,8 +99,49 @@ in {
     (lib.mkRenamedOptionModule ["uci" "secretsCommand"] ["secretsCommand"])
   ];
 
-  options.uci = rec {
-    settingsEarly = settings;
+  options.uci = {
+    settingsEarly = lib.mkOption {
+      type = with lib.types; let
+        scalar = oneOf [
+          str
+          int
+          bool
+          (submodule {
+            options._secret = lib.mkOption {
+              type = str;
+              description = ''
+                Name of the secret to insert into the config from data exported
+                by {option}`secretsCommand`. Secrets are always interpolated as
+                strings, which uci allows for scalars. Lists cannot currently
+                be made entirely secret, only individual values of lists can.
+              '';
+            };
+          })
+        ];
+        uciAttrsOf = type: elem: addCheck (attrsOf elem) (uciIdentifierCheck type);
+        options = uciAttrsOf "option" (either scalar (listOf scalar));
+      in
+        submodule {
+          freeformType =
+            # <config>.<name>=type       -> config.type.name ...
+            # <config>.@<anonymous>=type -> config.type = [{ ... }]
+            # config
+            attrsOf (
+              # type
+              attrsOf (
+                either (uciAttrsOf "section" options) # name ...
+                
+                (listOf options) # [{ ... }]
+              )
+            )
+            // {
+              description = "UCI config";
+            };
+        };
+      default = {};
+      description = ''
+      '';
+    };
     settings = lib.mkOption {
       type = with lib.types; let
         scalar = oneOf [
@@ -178,18 +217,21 @@ in {
   };
 
   config = let
+    mkConfigFile = name: settings:
+      pkgs.writeText name (formatConfig settings);
+
     ## Function that takes the set of config file to deploy and a priority.
-    mkDeployStep = configFile: priority:
+    mkDeployStep = configFile: settings: priority:
     # correctness of config identifiers can't be checked on the type level
     # because submodules are weird sometimes, so we have to do it here.
-      assert uciIdentifierCheck "config" cfg.settings; let
-        cfgName = baseNameOf config.build.configFile;
+      assert uciIdentifierCheck "config" settings; let
+        cfgName = baseNameOf configFile;
         jq = lib.getExe pkgs.jq;
-        configured = lib.attrNames config.uci.settings ++ config.uci.retain;
+        configured = lib.attrNames settings ++ config.uci.retain;
       in {
         inherit priority;
         prepare = ''
-          cp --no-preserve=all ${config.build.configFile} "$TMP"
+          cp --no-preserve=all ${configFile} "$TMP"
           (
             umask 0077
             ${lib.concatMapStrings (
@@ -206,7 +248,7 @@ in {
                 <(${jq} -r --arg s ${arg} '.[$s]'" | tostring | sub(\"'\"; \"'\\\\'''\")" <"$S") \
                 "$TMP"/${cfgName}
             ''
-          ) (collectSecrets cfg.settings)}
+          ) (collectSecrets settings)}
           )
         '';
         copy = ''
@@ -230,10 +272,9 @@ in {
         '';
       };
   in {
-    build.configFileEarly = pkgs.writeText "config" (formatConfig cfg.settingsEarly);
+    build.configFileEarly = mkConfigFile "early-config" config.uci.settingsEarly;
     deploySteps.uciConfigEarly =
-      {}
-      // mkDeployStep config.build.configFileEarly 50
+      mkDeployStep config.build.configFileEarly config.uci.settingsEarly 50
       // lib.mkIf (builtins.hasAttr "network" config.build.configFileEarly) {
         # Dangerous! May cause unknown state and blind device.
         apply = lib.mkAfter "service network restart";
@@ -243,7 +284,7 @@ in {
         apply = lib.mkAfter "service fstab restart";
       };
 
-    build.configFile = pkgs.writeText "config" (formatConfig cfg.settings);
-    deploySteps.uciConfig = mkDeployStep config.build.configFile 90;
+    build.configFile = mkConfigFile "config" config.uci.settings;
+    deploySteps.uciConfig = mkDeployStep config.build.configFile config.uci.settings 90;
   };
 }
