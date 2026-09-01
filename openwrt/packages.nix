@@ -42,9 +42,10 @@ in {
 
         (lib.mkIf (config.deploy.packageManager == "apk")
           ''
-            if [ ${depsApk.hash} != "$(apk query --no-cache ${depsApk.package_name} | grep Version | cut -d' ' -f2)" ]; then
+            if [ ${depsApk.hash} != "$(apk query --fields version --no-cache ${depsApk.package_name} | grep Version | cut -d' ' -f2)" ]; then
+              apk cache download
               apk update --no-cache
-              apk add --no-cache --allow-untrusted /tmp/deps-${depsApk.hash}.apk
+              apk add --no-cache --allow-untrusted --force-non-repository /tmp/deps-${depsApk.hash}.apk
             fi
           '')
       ];

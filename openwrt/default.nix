@@ -338,6 +338,7 @@
                     fi
                     if $RELOAD_ONLY; then
                       ssh 'logread -l9999 -f' &
+                      # ssh '/etc/init.d/config_generation enable'
                       ssh '/etc/init.d/config_generation prepare_reload'
                       ssh '/etc/init.d/config_generation start' &
                       ssh '/etc/init.d/config_generation apply_reload 2>&1 | logger -t '"$TAG"

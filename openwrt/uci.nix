@@ -220,6 +220,25 @@ in {
     mkConfigFile = name: settings:
       pkgs.writeText name (formatConfig settings);
 
+    mkApplyConfig = configFile: settings: let
+      cfgName = baseNameOf config.build.configFile;
+      configured = lib.attrNames config.uci.settings ++ config.uci.retain;
+    in ''
+      uci import < /tmp/${cfgName}
+      uci commit
+
+      (
+        cd /etc/config
+        for cfg in *; do
+          case "$cfg" in
+            ${lib.optionalString (configured != []) ''
+        ${lib.concatMapStringsSep "|" lib.escapeShellArg configured}) : ;;
+      ''}
+            *) rm "$cfg" ;;
+          esac
+        done
+      )
+    '';
     ## Function that takes the set of config file to deploy and a priority.
     mkDeployStep = configFile: settings: priority:
     # correctness of config identifiers can't be checked on the type level
@@ -227,7 +246,6 @@ in {
       assert uciIdentifierCheck "config" settings; let
         cfgName = baseNameOf configFile;
         jq = lib.getExe pkgs.jq;
-        configured = lib.attrNames settings ++ config.uci.retain;
       in {
         inherit priority;
         prepare = ''
@@ -254,34 +272,35 @@ in {
         copy = ''
           scp "$TMP"/${cfgName} device:/tmp/
         '';
-        apply = ''
-          uci import < /tmp/${cfgName}
-          uci commit
-
-          (
-            cd /etc/config
-            for cfg in *; do
-              case "$cfg" in
-                ${lib.optionalString (configured != []) ''
-            ${lib.concatMapStringsSep "|" lib.escapeShellArg configured}) : ;;
-          ''}
-                *) rm "$cfg" ;;
-              esac
-            done
-          )
-        '';
+        apply = mkApplyConfig configFile settings;
       };
   in {
     build.configFileEarly = mkConfigFile "early-config" config.uci.settingsEarly;
     deploySteps.uciConfigEarly =
       mkDeployStep config.build.configFileEarly config.uci.settingsEarly 50
-      // lib.mkIf (builtins.hasAttr "network" config.build.configFileEarly) {
-        # Dangerous! May cause unknown state and blind device.
-        apply = lib.mkAfter "service network restart";
-      }
-      // lib.mkIf (builtins.hasAttr "fstab" config.build.configFileEarly) {
-        # Dangerous! May cause unknown state and blind device.
-        apply = lib.mkAfter "service fstab restart";
+      # Dangerous! May cause unknown state.
+      // {
+        apply = lib.mkMerge [
+          (lib.mkBefore (mkApplyConfig config.build.configFileEarly config.uci.settingsEarly))
+          (
+            lib.mkIf (builtins.hasAttr "network" config.uci.settingsEarly)
+            (
+              lib.mkAfter ''
+                /etc/init.d/odhcpd restart
+                /etc/init.d/network restart
+                /etc/init.d/dnsmasq restart
+
+                # Force time sync
+                /etc/init.d/sysntpd restart
+                ntpd -dnq -p openwrt.pool.ntp.org
+              ''
+            )
+          )
+          (
+            lib.mkIf (builtins.hasAttr "fstab" config.uci.settingsEarly)
+            (lib.mkAfter "/etc/init.d/fstab restart")
+          )
+        ];
       };
 
     build.configFile = mkConfigFile "config" config.uci.settings;
