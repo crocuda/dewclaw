@@ -1,22 +1,23 @@
-{ config, lib, ... }:
-
-let
-  cfg = config.etc;
-in
-
 {
+  config,
+  lib,
+  ...
+}: let
+  cfg = config.etc;
+in {
   options.etc = lib.mkOption {
     type = lib.types.attrsOf (
       lib.types.submoduleWith {
         description = "`/etc` file description";
         modules = [
           (
-            { name, ... }:
-            {
+            {name, ...}: {
               options = {
-                enable = lib.mkEnableOption "this `/etc` file" // {
-                  default = true;
-                };
+                enable =
+                  lib.mkEnableOption "this `/etc` file"
+                  // {
+                    default = true;
+                  };
 
                 text = lib.mkOption {
                   type = lib.types.lines;
@@ -30,7 +31,7 @@ in
         ];
       }
     );
-    default = { };
+    default = {};
     description = ''
       Extra files to *create* in the target `/etc`. It is not currently possible to
       *delete* files from the target.
@@ -40,19 +41,20 @@ in
     '';
   };
 
-  config = lib.mkIf (cfg != { }) {
+  config = lib.mkIf (cfg != {}) {
     deploySteps.etc = {
       priority = 20;
       apply = lib.concatStrings (
         lib.mapAttrsToList (
           name: file:
-          lib.optionalString (file.enable) ''
-            ${lib.optionalString (dirOf name != ".") ''
-              mkdir -p ${lib.escapeShellArg (dirOf "/etc/${name}")}
-            ''}
-            echo ${lib.escapeShellArg file.text} >${lib.escapeShellArg "/etc/${name}"}
-          ''
-        ) cfg
+            lib.optionalString (file.enable) ''
+              ${lib.optionalString (dirOf name != ".") ''
+                mkdir -p ${lib.escapeShellArg (dirOf "/etc/${name}")}
+              ''}
+              echo ${lib.escapeShellArg file.text} >${lib.escapeShellArg "/etc/${name}"}
+            ''
+        )
+        cfg
       );
     };
   };
