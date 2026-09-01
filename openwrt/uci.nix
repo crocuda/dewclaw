@@ -276,32 +276,34 @@ in {
       };
   in {
     build.configFileEarly = mkConfigFile "early-config" config.uci.settingsEarly;
-    deploySteps.uciConfigEarly =
-      mkDeployStep config.build.configFileEarly config.uci.settingsEarly 50
-      # Dangerous! May cause unknown state.
-      // {
-        apply = lib.mkMerge [
-          (lib.mkBefore (mkApplyConfig config.build.configFileEarly config.uci.settingsEarly))
-          (
-            lib.mkIf (builtins.hasAttr "network" config.uci.settingsEarly)
-            (
-              lib.mkAfter ''
-                /etc/init.d/odhcpd restart
-                /etc/init.d/network restart
-                /etc/init.d/dnsmasq restart
+    deploySteps.uciConfigEarly = lib.mkMerge [
+      (lib.mkIf (builtins.hasAttr "settingEarly" config.uci)
+        (mkDeployStep config.build.configFileEarly config.uci.settingsEarly 50
+          # Dangerous! May cause unknown state.
+          // {
+            apply = lib.mkMerge [
+              (lib.mkBefore (mkApplyConfig config.build.configFileEarly config.uci.settingsEarly))
+              (
+                lib.mkIf (builtins.hasAttr "network" config.uci.settingsEarly)
+                (
+                  lib.mkAfter ''
+                    /etc/init.d/odhcpd restart
+                    /etc/init.d/network restart
+                    /etc/init.d/dnsmasq restart
 
-                # Force time sync
-                /etc/init.d/sysntpd restart
-                ntpd -dnq -p openwrt.pool.ntp.org
-              ''
-            )
-          )
-          (
-            lib.mkIf (builtins.hasAttr "fstab" config.uci.settingsEarly)
-            (lib.mkAfter "/etc/init.d/fstab restart")
-          )
-        ];
-      };
+                    # Force time sync
+                    /etc/init.d/sysntpd restart
+                    ntpd -dnq -p openwrt.pool.ntp.org
+                  ''
+                )
+              )
+              (
+                lib.mkIf (builtins.hasAttr "fstab" config.uci.settingsEarly)
+                (lib.mkAfter "/etc/init.d/fstab restart")
+              )
+            ];
+          }))
+    ];
 
     build.configFile = mkConfigFile "config" config.uci.settings;
     deploySteps.uciConfig = mkDeployStep config.build.configFile config.uci.settings 90;

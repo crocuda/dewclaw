@@ -68,7 +68,7 @@ in {
                 (
                   pkg="${name}"
                   provider="${value}"
-                  if ! apk status --no-cache "$provider" 2>/dev/null | grep -e -A1 Status: | grep -q installed; then
+                  if ! apk status --no-cache "$provider" 2>/dev/null | grep -e Status: | grep -q installed; then
                     temp="$(mktemp -d)"
                     cd "$temp"
                     apk fetch --no-cache "$pkg" "$provider"
